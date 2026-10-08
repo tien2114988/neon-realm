@@ -68,10 +68,26 @@
     100%{opacity:0;transform:translate(-50%,-58%) scale(1.04)}}
 
   /* skill bars bottom */
-  #skills{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);display:flex;gap:14px;pointer-events:none}
+  #skills{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);display:flex;gap:14px;pointer-events:none;z-index:5}
   .skill{position:relative;width:74px;height:74px;border-radius:18px;background:rgba(10,4,24,.7);
     border:2px solid rgba(255,255,255,.16);display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:2px;overflow:hidden;backdrop-filter:blur(6px)}
+    gap:2px;overflow:hidden;backdrop-filter:blur(6px);pointer-events:auto;cursor:pointer;
+    user-select:none;-webkit-user-select:none;transition:transform .1s}
+  .skill:active{transform:scale(.9)}
+  /* nút analog di chuyển (chỉ hiện trên mobile khi đang chơi) */
+  #stick{position:fixed;left:26px;bottom:26px;width:132px;height:132px;border-radius:50%;
+    border:3px solid rgba(0,245,212,.35);background:rgba(10,4,24,.35);display:none;
+    place-items:center;pointer-events:none;z-index:5}
+  #stick .knob{width:56px;height:56px;border-radius:50%;background:rgba(0,245,212,.75);
+    box-shadow:0 0 24px rgba(0,245,212,.7);transition:transform .05s linear}
+  body.touchmode #stick.active{display:grid}
+  .touch-hint{display:none}
+  @media (pointer:coarse){
+    .touch-hint{display:block;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.18);
+      border-radius:10px;padding:8px 14px;font-size:13px;font-weight:600;max-width:520px}
+    #skills{bottom:14px}
+    .skill{width:66px;height:66px}
+  }
   .skill .ic{font-size:24px;line-height:1;filter:drop-shadow(0 0 8px rgba(255,255,255,.5))}
   .skill .key{font-family:var(--display);font-size:11px;opacity:.75}
   .skill .cd{position:absolute;left:0;bottom:0;width:100%;background:rgba(0,0,0,.66);height:0%}
@@ -138,8 +154,10 @@
 <div id="combo"></div>
 <div id="banner"><div class="big" id="bannerBig"></div><div class="sub" id="bannerSub"></div></div>
 
+<div id="stick" aria-hidden="true"><div class="knob"></div></div>
+
 <div id="skills">
-  <div class="skill ready" id="skDash" title="Dash"><span class="ic">💨</span><span class="key">SHIFT</span><div class="cd"></div><span class="cdText"></span></div>
+  <div class="skill ready" id="skDash" title="Lướt"><span class="ic">💨</span><span class="key">SHIFT</span><div class="cd"></div><span class="cdText"></span></div>
   <div class="skill ready" id="skPulse" title="Xung kích"><span class="ic">💥</span><span class="key">E</span><div class="cd"></div><span class="cdText"></span></div>
   <div class="skill ready" id="skUlt" title="Cơn mưa đạn"><span class="ic">🌪️</span><span class="key">Q</span><div class="cd"></div><span class="cdText"></span></div>
 </div>
@@ -156,6 +174,7 @@
     <div class="k"><b>Q</b> chiêu cuối: mưa đạn</div>
     <div class="k"><b>P</b> tạm dừng · <b>M</b> tắt tiếng</div>
   </div>
+  <div class="touch-hint">📱 Chế độ điện thoại: <b>ngón cái trái</b> = di chuyển (cần điều khiển ảo), <b>giữ ngón phải</b> = bắn theo hướng chạm, <b>chạm nhanh</b> = lướt, bấm 💥 / 🌪️ để dùng kĩ năng. Khuyến nghị xoay ngang màn hình.</div>
   <div class="legend">
     <span><i style="background:#25d366"></i>tim hồi máu</span>
     <span><i style="background:#fee440"></i>bắn nhanh</span>
@@ -319,22 +338,26 @@ cv.addEventListener('contextmenu', e => e.preventDefault());
 /* touch: trái = di chuyển, phải = bắn */
 cv.addEventListener('touchstart', e => {
   audioInit();
+  document.body.classList.add('touchmode');
   for (const t of e.changedTouches){
-    if (t.clientX < W*0.45 && !touchMove) touchMove = {id:t.identifier, ox:t.clientX, oy:t.clientY, x:t.clientX, y:t.clientY};
+    if (t.clientX < W*0.45 && !touchMove){
+      touchMove = {id:t.identifier, ox:t.clientX, oy:t.clientY, x:t.clientX, y:t.clientY};
+      showStick(t.clientX, t.clientY);
+    }
     else if (!touchAim) touchAim = {id:t.identifier, x:t.clientX, y:t.clientY, start:performance.now()};
   }
   e.preventDefault();
 }, {passive:false});
 cv.addEventListener('touchmove', e => {
   for (const t of e.changedTouches){
-    if (touchMove && t.identifier===touchMove.id){ touchMove.x=t.clientX; touchMove.y=t.clientY; }
+    if (touchMove && t.identifier===touchMove.id){ touchMove.x=t.clientX; touchMove.y=t.clientY; moveStick(t.clientX, t.clientY); }
     if (touchAim && t.identifier===touchAim.id){ touchAim.x=t.clientX; touchAim.y=t.clientY; }
   }
   e.preventDefault();
 }, {passive:false});
 cv.addEventListener('touchend', e => {
   for (const t of e.changedTouches){
-    if (touchMove && t.identifier===touchMove.id) touchMove=null;
+    if (touchMove && t.identifier===touchMove.id){ touchMove=null; hideStick(); }
     if (touchAim && t.identifier===touchAim.id){
       const held = (performance.now()-touchAim.start)/1000;
       if (held < .28) tryDash();   // tap nhanh = dash
@@ -343,6 +366,32 @@ cv.addEventListener('touchend', e => {
   }
   e.preventDefault();
 }, {passive:false});
+
+/* cần điều khiển ảo (chỉ nhìn, vị trí lấy từ touchMove) */
+const stickEl = document.getElementById('stick'), knobEl = stickEl.querySelector('.knob');
+function showStick(x,y){
+  stickEl.style.left = (x-66)+'px'; stickEl.style.top = (y-66)+'px';
+  stickEl.style.bottom = 'auto';
+  stickEl.classList.add('active');
+  knobEl.style.transform = 'translate(0,0)';
+}
+function moveStick(x,y){
+  const dx = x - (parseFloat(stickEl.style.left)+66);
+  const dy = y - (parseFloat(stickEl.style.top)+66);
+  const l = Math.hypot(dx,dy) || 1;
+  const c = Math.min(38, l);
+  knobEl.style.transform = `translate(${dx/l*c}px, ${dy/l*c}px)`;
+}
+function hideStick(){ stickEl.classList.remove('active'); }
+
+/* nút kĩ năng bấm được bằng ngón tay */
+const bindSkill = (id, fn) => {
+  const n = document.getElementById(id);
+  n.addEventListener('pointerdown', ev => { ev.preventDefault(); audioInit(); fn(); });
+};
+bindSkill('skDash', tryDash);
+bindSkill('skPulse', doPulse);
+bindSkill('skUlt', doUlt);
 
 /* ---------- particles ---------- */
 function burst(x,y,color,n=12,spd=260,size=4,life=.55,shape='spark'){
@@ -612,8 +661,17 @@ function update(dt){
   player.x = clamp(player.x, ARENA.x+player.r, ARENA.x+ARENA.w-player.r);
   player.y = clamp(player.y, ARENA.y+player.r, ARENA.y+ARENA.h-player.r);
 
-  /* aim */
-  if (touchAim){ player.aim = Math.atan2(touchAim.y-player.y, touchAim.x-player.x); }
+  /* aim — trên mobile có auto-aim nhẹ: bám quái gần nhất trong 460px */
+  if (touchAim){
+    let best = null, bd = 460*460;
+    for (const e of enemies){
+      if (e.spawn > 0) continue;
+      const dd = d2(e, player);
+      if (dd < bd){ bd = dd; best = e; }
+    }
+    const tx = best ? best.x : touchAim.x, ty = best ? best.y : touchAim.y;
+    player.aim = Math.atan2(ty-player.y, tx-player.x);
+  }
   else if (mouse.active){ player.aim = Math.atan2(mouse.y-player.y, mouse.x-player.x); }
   player.bob += dt*6;
 
